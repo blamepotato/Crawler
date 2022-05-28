@@ -15,14 +15,16 @@ from io import BytesIO
 import requests
 from docx.shared import Inches
 import time
+import traceback
+
 
 
 # global variables
-users = ["老师", "沙哥", '小新的蜡笔', '逍遥De子原', '泡沫', '杨姐', 'z z y y', '春夏秋冬', '112234',
-          '仙人板都不板', '黑砖ray卢', 'Sx🐷', 'Rain', '阿白', '上帝D宠儿', 'NULL', '🐱', '不二。eNdeaVor', ]
+users = [] # the users you want to highlight
 
-admin = ["老师", "沙哥"]
+admin = [] # instructor of the website 
 
+max_retry = 5 # how many times you can retry
 
 def login_with_cookie(date):
     url = "redacted" + date
@@ -37,34 +39,57 @@ def login_with_cookie(date):
     doc = Document()
 
     try:
-        page_number = int(WebDriverWait(driver, 60).until(EC.visibility_of_element_located((By.CLASS_NAME, "pageNum"))).text.split("/")[1])
+        page_number = int(WebDriverWait(driver, 60).until(
+            EC.visibility_of_element_located(
+                (By.CLASS_NAME, "pageNum"))).text.split("/")[1])
         for i in range(page_number):
-            WebDriverWait(driver, 60).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "message-group"))
-            )
-            authors = driver.find_elements(By.CLASS_NAME, "nickName")
-            content_wrappers = driver.find_elements(By.CLASS_NAME, "ant-dropdown-trigger")
-            times = driver.find_elements(By.CLASS_NAME, "time-style")
-            assert(len(authors) == len(content_wrappers) == len(times))
-            for author, content_wrapper, curr_time in zip(authors, content_wrappers, times):
+            try:
+                WebDriverWait(driver, 120).until(EC.visibility_of_element_located((By.CLASS_NAME, "message-group")))
+            except TimeoutException:
+                global max_retry
+                while max_retry > 0:
+                    print("卡住了，我还能再试 " + str(max_retry) + " 次")
+                    driver.quit()
+                    max_retry -= 1
+                    login_with_cookie(date)
+                    return
+                if max_retry <= 0:
+                    print("寄，呼叫gy")
+                    driver.quit()
+                    return
+
+            messages = driver.find_elements(By.CLASS_NAME, "message-group")
+            while len(messages) != 20 and i != page_number - 1:
+                print("trying")
+                time.sleep(1)
+                messages = driver.find_elements(By.CLASS_NAME, "message-group")
+            for message in messages:
+                author = message.find_element(By.CLASS_NAME, "nickName")
+                content_wrapper = message.find_element(By.XPATH, ".//p | .//img[@class='img-style']")
+                curr_time = message.find_element(By.CLASS_NAME, "time-style")
+          
                 if content_wrapper.text:
-                    content = content_wrapper.find_element(By.TAG_NAME, "p").text
-                    render_file(doc, author.text, curr_time.text, content, date)
+                    render_file(doc, author.text, curr_time.text,
+                                content_wrapper.text, date)
                 else:
                     if author.text not in admin:
                         continue
-                    img = content_wrapper.find_element(By.TAG_NAME, "img")
-                    img_link = img.get_attribute("src")
+                    img_link = content_wrapper.get_attribute("src")
+                    if not img_link:
+                        print("teacher emote here", curr_time.text, author.text,
+                              content_wrapper.text)
+                        continue
                     add_image(doc, author.text, curr_time.text, img_link, date)
             click = driver.find_element(By.CLASS_NAME, "el-icon-arrow-right")
             driver.execute_script('arguments[0].click();', click)
+        doc.save(date + ".docx")
         print("做完了，跑路！")
         driver.quit()
         return
-    except Exception as e:
-        print("error:")
-        print(e)
+    except Exception:
+        print(traceback.format_exc())
         driver.quit()
+        print("呼叫gy")
         return
 
 
